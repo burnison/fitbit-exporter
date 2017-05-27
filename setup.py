@@ -14,7 +14,8 @@ setup(
         zip_safe=False,
 
         install_requires=[
-            'oauth2client',
+            'oauth2client>=4.1.0',
+            'graphitesend>=0.10.0',
         ],
 
         entry_points={
