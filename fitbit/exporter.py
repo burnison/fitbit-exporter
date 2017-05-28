@@ -189,10 +189,10 @@ def main(argv=None):
 
     parser.add_argument('-t', '--tag', required=False, default=[],
             metavar='key=value', action='append',
-            help='A tag for the storage system, if supported.')
+            help='A set of tags for the storage system, if supported. This argument may be repeated.')
 
     parser.add_argument('--debug', action='store_true', default=False)
-    parser.add_argument('--period', default='1d', required=False, help='The end period. Default of 1 day.')
+    parser.add_argument('--period', default='1d', required=False, help='May be end date or period. Default of 1d.')
 
     parser.add_argument('--all', action='store_true', default=False, help='Export all known types.')
     parser.add_argument('--body', action='store_true', default=False, help='Export body data.')
