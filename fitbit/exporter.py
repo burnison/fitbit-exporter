@@ -102,12 +102,12 @@ class FitBit:
     def distance(self):
         return self._activities('distance', '1min')
 
-    def weight(self, resource):
+    def body(self, resource):
         return self._body(resource)
 
 
 class Graphite:
-    def __init__(self, connect, prefix):
+    def __init__(self, connect, prefix, tags):
         self.prefix = prefix
         self.connection = connect
 
@@ -124,9 +124,35 @@ class Graphite:
         s.sendall(payload)
         s.close()
 
+class Influx:
+    def __init__(self, connect, prefix, tags):
+        self.prefix = prefix
+        self.connection = connect
+        self.tags = tags
+        self.http = httplib2.Http()
+
+    def __prefix(self, metric):
+        return "%s.%s" % (self.prefix, metric[0])
+
+    def send(self, metrics):
+        tags = ",".join(self.tags)
+        lines = [
+            "%s,%s value=%s %d" % (self.__prefix(t), tags, t[1][1], t[1][0] * 1000 * 1000000)
+            for t in metrics ]
+        payload = "\n".join(lines)
+
+        host = "%s:%s" % (self.connection[0], self.connection[1])
+        uri = "http://%s/write?db=graphite" % host
+        resp, content = self.http.request(uri, method="POST", body=payload)
+
+        if resp.status != 204:
+            raise FitBitError(
+                "Unable to send InfluxDB data: %s\n%s" % (resp, content)
+            )
+
+
 
 def _parse_body(resource, raw_data):
-    print(raw_data)
     data = []
     for d in raw_data["body-%s" % resource]:
         instant = datetime.strptime(d['dateTime'], '%Y-%m-%d')
@@ -147,14 +173,24 @@ def _parse_activities(activity, raw_data):
 def _try_query(name, query, parser, reporter):
     try:
         reporter(parser(name, query()))
-    except FitBitError as e:
+    except Error as e:
         print(str(e))
         return None
 
 
 def main(argv=None):
     parser = argparse.ArgumentParser(parents=[tools.argparser])
-    parser.add_argument('--graphite', default='localhost:2004')
+
+    ingester_group = parser.add_mutually_exclusive_group(required=True)
+    ingester_group.add_argument('--graphite', metavar='url',
+            help='Use a graphite host, for example, localhost:2004.')
+    ingester_group.add_argument('--influx', metavar='url',
+            help='Use an influx host, for example, localhost:8086.')
+
+    parser.add_argument('-t', '--tag', required=False, default=[],
+            metavar='key=value', action='append',
+            help='A tag for the storage system, if supported.')
+
     parser.add_argument('--debug', action='store_true', default=False)
     parser.add_argument('--period', default='1d', required=False, help='The end period. Default of 1 day.')
 
@@ -168,18 +204,19 @@ def main(argv=None):
     if args.debug:
         httplib2.debuglevel=4
 
-    graphite_connection = args.graphite.split(':')
-    graphite = Graphite((graphite_connection[0], int(graphite_connection[1])), 'fitness').send
+    ingester_clazz = Graphite if args.graphite else Influx
+    connection = (args.graphite or args.influx).split(':')
+    ingester = ingester_clazz((connection[0], int(connection[1])), 'fitness', args.tag).send
     client = FitBit(args)
 
     for activity in ACTIVITIES:
         if args.__getattribute__(activity) or args.all:
-            _try_query(activity, client.__getattribute__(activity), _parse_activities, graphite)
+            _try_query(activity, client.__getattribute__(activity), _parse_activities, ingester)
 
     if args.body or args.all:
-        _try_query('weight', partial(client.weight, 'weight'), _parse_body, graphite)
-        _try_query('fat', partial(client.weight, 'fat'), _parse_body, graphite)
-        _try_query('bmi', partial(client.weight, 'bmi'), _parse_body, graphite)
+        _try_query('weight', partial(client.body, 'weight'), _parse_body, ingester)
+        _try_query('fat', partial(client.body, 'fat'), _parse_body, ingester)
+        _try_query('bmi', partial(client.body, 'bmi'), _parse_body, ingester)
 
 
 if __name__ == "__main__":
