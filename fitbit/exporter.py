@@ -32,6 +32,29 @@ class FitBitError(Exception):
     def __init__(self, msg):
         super().__init__(msg)
 
+class FitBitConnection(httplib2.Http):
+    """
+    FitBit requires an Authorization header to be present on every request.
+    Out of the box, Google's oauth2 client does not do this. As such, this
+    is a basic override to inject missing headers.
+    """
+
+    def __init__(self, cache=None, timeout=None,
+                 proxy_info=httplib2.proxy_info_from_environment,
+                 ca_certs=None, disable_ssl_certificate_validation=False):
+        super().__init__(cache, timeout, proxy_info, ca_certs,
+                         disable_ssl_certificate_validation)
+
+    def request(self, uri, method="GET", body=None, headers=None,
+                redirections=httplib2.DEFAULT_MAX_REDIRECTS,
+                connection_type=None):
+        if headers is None:
+            headers = {}
+        if 'Authorization' not in headers:
+            headers.update({'Authorization': 'Basic ' + AUTHORIZATION})
+        return super().request(uri, method=method, body=body, headers=headers,
+                               redirections=redirections,
+                               connection_type=connection_type)
 
 class FitBit:
     def __init__(self, args):
@@ -59,9 +82,15 @@ class FitBit:
                 user_agent='fitbit-exporter/1.1',
                 authorization_header="Basic %s" % AUTHORIZATION)
         storage = Storage(CREDENDIAL_STORE)
+
         credz = storage.get()
+
         if credz is None or credz.invalid:
             credz = tools.run_flow(flow, storage, args)
+
+        elif credz is not None and credz.access_token_expired:
+            credz.refresh(FitBitConnection())
+
         return credz
 
     def _body(self, resource):
@@ -171,11 +200,7 @@ def _parse_activities(activity, raw_data):
     return data
 
 def _try_query(name, query, parser, reporter):
-    try:
-        reporter(parser(name, query()))
-    except Error as e:
-        print(str(e))
-        return None
+    reporter(parser(name, query()))
 
 
 def main(argv=None):
