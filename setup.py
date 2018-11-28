@@ -16,6 +16,7 @@ setup(
         install_requires=[
             'oauth2client>=4.1.0',
             'graphitesend>=0.10.0',
+            'pytz>=2018.3',
         ],
 
         entry_points={
